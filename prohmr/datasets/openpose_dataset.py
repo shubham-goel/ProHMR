@@ -73,11 +73,14 @@ class OpenPoseDataset(ImageDataset):
         """
         body_keypoints = []
         imgnames = []
+        personids = []  # Monitor id of person within image
         scales = []
         centers = []
         for i in range(len(self.img_paths)):
             img_path = self.img_paths[i]
             item = self.get_example(img_path)
+            if len(item) == 0:
+                continue
             num_people = item['keypoints_2d'].shape[0]
             for n in range(num_people):
                 keypoints_n = item['keypoints_2d'][n]
@@ -90,7 +93,9 @@ class OpenPoseDataset(ImageDataset):
                 scales.append(scale)
                 centers.append(center)
                 imgnames.append(item['img_path'])
+                personids.append(n)
         self.imgname = np.array(imgnames)
+        self.personid = np.array(personids, dtype=np.int32)
         self.scale = np.array(scales).astype(np.float32) / 200.0
         self.center = np.array(centers).astype(np.float32)
         body_keypoints_2d = np.array(body_keypoints).astype(np.float32)

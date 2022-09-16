@@ -16,6 +16,7 @@ import torch
 import argparse
 import os
 import cv2
+import numpy as np
 from tqdm import tqdm
 
 from prohmr.configs import get_config, prohmr_config, dataset_config
@@ -54,10 +55,10 @@ if args.run_fitting:
     keypoint_fitting = KeypointFitting(model_cfg)
 
 # Create a dataset on-the-fly
-dataset = OpenPoseDataset(model_cfg, img_folder=args.img_folder, keypoint_folder=args.keypoint_folder, max_people_per_image=1)
+dataset = OpenPoseDataset(model_cfg, img_folder=args.img_folder, keypoint_folder=args.keypoint_folder, max_people_per_image=None)
 
 # Setup a dataloader with batch_size = 1 (Process images sequentially)
-dataloader = torch.utils.data.DataLoader(dataset, args.batch_size, shuffle=False)
+dataloader = torch.utils.data.DataLoader(dataset, args.batch_size, shuffle=False, drop_last=False)
 
 # Setup the renderer
 renderer = Renderer(model_cfg, faces=model.smpl.faces)
@@ -71,22 +72,45 @@ for i, batch in enumerate(tqdm(dataloader)):
     batch = recursive_to(batch, device)
     with torch.no_grad():
         out = model(batch)
-
-    batch_size = batch['img'].shape[0]
-    for n in range(batch_size):
-        img_fn, _ = os.path.splitext(os.path.split(batch['imgname'][n])[1])
-        regression_img = renderer(out['pred_vertices'][n, 0].detach().cpu().numpy(),
-                                  out['pred_cam_t'][n, 0].detach().cpu().numpy(),
-                                  batch['img'][n])
-        cv2.imwrite(os.path.join(args.out_folder, f'{img_fn}_regression.{args.out_format}'), 255*regression_img[:, :, ::-1])
+        out_dict = {
+            'global_orient': out['pred_smpl_params']['global_orient'].squeeze(2).detach().cpu().numpy(),
+            'body_pose': out['pred_smpl_params']['body_pose'].detach().cpu().numpy(),
+            'betas': out['pred_smpl_params']['betas'].detach().cpu().numpy(),
+            'camera_translation': out['pred_cam_t'].detach().cpu().numpy(),
+        }
     if args.run_fitting:
         opt_out = model.downstream_optimization(regression_output=out,
                                                 batch=batch,
                                                 opt_task=keypoint_fitting,
                                                 use_hips=False,
                                                 full_frame=args.full_frame)
-        for n in range(batch_size):
-            img_fn, _ = os.path.splitext(os.path.split(batch['imgname'][n])[1])
+        opt_out_dict = {
+            'global_orient': opt_out['smpl_params']['global_orient'].squeeze(1).detach().cpu().numpy(),
+            'body_pose': opt_out['smpl_params']['body_pose'].detach().cpu().numpy(),
+            'betas': opt_out['smpl_params']['betas'].detach().cpu().numpy(),
+            'camera_translation': opt_out['camera_translation'].detach().cpu().numpy(),
+        }
+
+    batch_size = batch['img'].shape[0]
+    for n in range(batch_size):
+        img_fn, _ = os.path.splitext(os.path.split(batch['imgname'][n])[1])
+        personid = batch['personid'][n]
+        img_fn = f'{img_fn}_p{personid}'
+
+        # Save result to disk
+        np.savez(os.path.join(args.out_folder, f'{img_fn}_regression.npz'),
+                            **{k:v[n] for k,v in out_dict.items()})
+        if args.run_fitting:
+            np.savez(os.path.join(args.out_folder, f'{img_fn}_fitting.npz'),
+                     **{k:v[n] for k,v in opt_out_dict.items()})
+
+        # Visualization
+        regression_img = renderer(out['pred_vertices'][n, 0].detach().cpu().numpy(),
+                                  out['pred_cam_t'][n, 0].detach().cpu().numpy(),
+                                  batch['img'][n])
+        cv2.imwrite(os.path.join(args.out_folder, f'{img_fn}_regression.{args.out_format}'), 255*regression_img[:, :, ::-1])
+
+        if args.run_fitting:
             fitting_img = renderer(opt_out['vertices'][n].detach().cpu().numpy(),
                                    opt_out['camera_translation'][n].detach().cpu().numpy(),
                                    batch['img'][n], imgname=batch['imgname'][n], full_frame=args.full_frame)

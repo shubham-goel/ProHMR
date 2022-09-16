@@ -34,6 +34,7 @@ class ImageDataset(Dataset):
         self.data = np.load(dataset_file)
 
         self.imgname = self.data['imgname']
+        self.personid = np.zeros(len(self.imgname), dtype=np.int32)
 
         body_permutation = [0, 1, 5, 6, 7, 2, 3, 4, 8, 12, 13, 14, 9, 10, 11, 16, 15, 18, 17, 22, 23, 24, 19, 20, 21]
         extra_permutation = [5, 4, 3, 2, 1, 0, 11, 10, 9, 8, 7, 6, 12, 13, 14, 15, 16, 17, 18]
@@ -153,5 +154,6 @@ class ImageDataset(Dataset):
         item['has_smpl_params'] = has_smpl_params
         item['smpl_params_is_axis_angle'] = smpl_params_is_axis_angle
         item['imgname'] = image_file
+        item['personid'] = int(self.personid[idx])
         item['idx'] = idx
         return item
