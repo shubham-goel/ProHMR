@@ -36,6 +36,7 @@ parser.add_argument('--out_format', type=str, default='jpg', choices=['jpg', 'pn
 parser.add_argument('--run_fitting', dest='run_fitting', action='store_true', default=False, help='If set, run fitting on top of regression')
 parser.add_argument('--full_frame', dest='full_frame', action='store_true', default=False, help='If set, run fitting in the original image space and not in the crop.')
 parser.add_argument('--batch_size', type=int, default=1, help='Batch size for inference/fitting')
+parser.add_argument("--img_name_filter", type=str, default='.*')
 
 
 args = parser.parse_args()
@@ -55,7 +56,7 @@ if args.run_fitting:
     keypoint_fitting = KeypointFitting(model_cfg)
 
 # Create a dataset on-the-fly
-dataset = OpenPoseDataset(model_cfg, img_folder=args.img_folder, keypoint_folder=args.keypoint_folder, max_people_per_image=None)
+dataset = OpenPoseDataset(model_cfg, img_folder=args.img_folder, keypoint_folder=args.keypoint_folder, max_people_per_image=None, img_name_filter=args.img_name_filter)
 
 # Setup a dataloader with batch_size = 1 (Process images sequentially)
 dataloader = torch.utils.data.DataLoader(dataset, args.batch_size, shuffle=False, drop_last=False)

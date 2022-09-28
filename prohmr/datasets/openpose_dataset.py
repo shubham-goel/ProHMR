@@ -6,11 +6,22 @@ https://github.com/vchoutas/smplify-x/blob/master/smplifyx/data_parser.py
 import os
 import json
 import numpy as np
+import re
 from typing import Dict, Optional
 
 from yacs.config import CfgNode
 
 from .image_dataset import ImageDataset
+
+def regex_to_matcher(regexp):
+    if regexp.startswith('__lex__'):
+        start, end = regexp[len('__lex__'):].split(',')
+        print(f'Will run on all names between {start} and {end}')
+        return lambda x: (start <= x <= end)
+    else:
+        print(f'Will run on all names matching {regexp}')
+        __pattern = re.compile(regexp)
+        return lambda x: __pattern.match(x)
 
 def read_openpose(keypoint_fn: str, max_people_per_image: Optional[int] = None):
     with open(keypoint_fn) as keypoint_file:
@@ -35,6 +46,7 @@ class OpenPoseDataset(ImageDataset):
                  rescale_factor: float = 1.2,
                  train: bool = False,
                  max_people_per_image: Optional[int] = None,
+                 img_name_filter: str = '.*',
                  **kwargs):
         """
         Dataset class used for loading images and corresponding annotations from image/OpenPose pairs.
@@ -51,8 +63,9 @@ class OpenPoseDataset(ImageDataset):
         self.img_folder = img_folder
         self.keypoint_folder = keypoint_folder
 
+        matcher = regex_to_matcher(img_name_filter)
         self.img_paths = [os.path.join(self.img_folder, img_fn)
-                          for img_fn in os.listdir(self.img_folder)]
+                          for img_fn in os.listdir(self.img_folder) if matcher(img_fn)]
         self.img_paths = sorted(self.img_paths)
         self.rescale_factor = rescale_factor
         self.train = train
