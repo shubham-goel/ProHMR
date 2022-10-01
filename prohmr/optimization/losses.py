@@ -51,6 +51,7 @@ def keypoint_fitting_loss(smpl_params: Dict,
 
     # Heuristic for scaling data_weight with resolution used in SMPLify-X
     data_weight = (1000. / img_size).reshape(-1, 1, 1).repeat(1, 1, 2)
+    data_weight.fill_(1000/256.0)
 
     # Project 3D model joints
     projected_joints = perspective_projection(model_joints, camera_translation, focal_length, camera_center=camera_center)

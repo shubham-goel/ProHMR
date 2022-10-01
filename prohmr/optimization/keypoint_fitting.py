@@ -30,16 +30,20 @@ class KeypointFitting(OptimizationTask):
 
         # Differentiating between fitting on the cropped box or the original image coordinates
         if full_frame:
-            # Compute initial camera translation
-            box_center = data['box_center']
-            box_size = data['box_size']
-            img_size = data['img_size']
+            ## Compute initial camera translation
+            rescale_factor = self.cfg.MODEL.IMAGE_SIZE / data['box_size']
+            box_center = data['box_center'] * rescale_factor[:,None]
+            box_size = data['box_size'] * rescale_factor
+            img_size = data['img_size'] * rescale_factor[:,None]
             camera_center = 0.5 * img_size
-            depth = 2 * self.cfg.EXTRA.FOCAL_LENGTH / (box_size.reshape(batch_size, 1) * pred_cam[:,0].reshape(batch_size, 1) + 1e-9)
+            img_size = self.cfg.MODEL.IMAGE_SIZE * torch.ones_like(img_size)
+            focal_length = self.cfg.EXTRA.FOCAL_LENGTH * rescale_factor[:, None] * torch.ones_like(camera_center)
+            depth = 2 * focal_length[:,[0]] / (box_size.reshape(batch_size, 1) * pred_cam[:,0].reshape(batch_size, 1) + 1e-9)
             init_cam_t = torch.zeros_like(pred_cam)
-            init_cam_t[:, :2] = pred_cam[:, 1:] + (box_center - camera_center) * depth / self.cfg.EXTRA.FOCAL_LENGTH
+            init_cam_t[:, :2] = pred_cam[:, 1:] + (box_center - camera_center) * depth / focal_length[:,[0]]
             init_cam_t[:, -1] = depth.reshape(batch_size)
             keypoints_2d = data['orig_keypoints_2d']
+            keypoints_2d[:, :, :2] = keypoints_2d[:, :, :2] * rescale_factor[:,None,None]
         else:
             # Translation has been already computed in the forward pass
             init_cam_t = regression_output['pred_cam_t'][:, 0]
@@ -47,6 +51,7 @@ class KeypointFitting(OptimizationTask):
             keypoints_2d[:, :, :-1] = self.cfg.MODEL.IMAGE_SIZE * (keypoints_2d[:, :, :-1] + 0.5)
             img_size = torch.tensor([self.cfg.MODEL.IMAGE_SIZE, self.cfg.MODEL.IMAGE_SIZE], device=pred_cam.device, dtype=pred_cam.dtype).reshape(1, 2).repeat(batch_size, 1)
             camera_center = 0.5 * img_size
+            focal_length = self.cfg.EXTRA.FOCAL_LENGTH * torch.ones_like(camera_center)
 
         # Make camera translation a learnable parameter
         camera_translation = init_cam_t.detach().clone()
@@ -58,7 +63,6 @@ class KeypointFitting(OptimizationTask):
             joints_conf[:, [8, 9, 12, 25+2, 25+3, 25+14]] *= 0.0
 
 
-        focal_length = self.cfg.EXTRA.FOCAL_LENGTH * torch.ones_like(camera_center)
 
         # Get predicted betas
         betas = regression_output['pred_smpl_params']['betas'][:,0].detach().clone()
@@ -90,7 +94,7 @@ class KeypointFitting(OptimizationTask):
             loss = keypoint_fitting_loss(smpl_params, model_joints,
                                         camera_translation, camera_center, img_size,
                                         joints_2d, joints_conf, pose_prior,
-                                        focal_length)
+                                        focal_length, shape_prior_weight=20.)
             loss.backward()
             return loss
 
