@@ -5,6 +5,7 @@ https://github.com/vchoutas/smplify-x/blob/master/smplifyx/data_parser.py
 """
 import os
 import json
+from pathlib import Path
 import numpy as np
 import re
 from typing import Dict, Optional
@@ -12,6 +13,11 @@ from typing import Dict, Optional
 from yacs.config import CfgNode
 
 from .image_dataset import ImageDataset
+from ..utils.rotation_conversions import matrix_to_axis_angle as rotmat_to_aa_torch
+
+def rotmat_to_aa(rotmat):
+    import torch
+    return rotmat_to_aa_torch(torch.from_numpy(rotmat)).numpy()
 
 def regex_to_matcher(regexp):
     if regexp.startswith('__lex__'):
@@ -47,6 +53,7 @@ class OpenPoseDataset(ImageDataset):
                  train: bool = False,
                  max_people_per_image: Optional[int] = None,
                  img_name_filter: str = '.*',
+                 prohmr_fits_folder: Optional[str] = None,
                  **kwargs):
         """
         Dataset class used for loading images and corresponding annotations from image/OpenPose pairs.
@@ -62,6 +69,7 @@ class OpenPoseDataset(ImageDataset):
         self.cfg = cfg
         self.img_folder = img_folder
         self.keypoint_folder = keypoint_folder
+        self.prohmr_fits_folder = prohmr_fits_folder
 
         matcher = regex_to_matcher(img_name_filter)
         self.img_paths = [os.path.join(self.img_folder, img_fn)
@@ -70,7 +78,7 @@ class OpenPoseDataset(ImageDataset):
         self.rescale_factor = rescale_factor
         self.train = train
         self.max_people_per_image = max_people_per_image
-        self.img_dir = ''
+        self.img_dir = self.img_folder
         body_permutation = [0, 1, 5, 6, 7, 2, 3, 4, 8, 12, 13, 14, 9, 10, 11, 16, 15, 18, 17, 22, 23, 24, 19, 20, 21]
         extra_permutation = [5, 4, 3, 2, 1, 0, 11, 10, 9, 8, 7, 6, 12, 13, 14, 15, 16, 17, 18]
         flip_keypoint_permutation = body_permutation + [25 + i for i in extra_permutation]
@@ -89,6 +97,13 @@ class OpenPoseDataset(ImageDataset):
         personids = []  # Monitor id of person within image
         scales = []
         centers = []
+        body_pose = []
+        has_body_pose = []
+        betas = []
+        has_betas = []
+        extra_info = []
+        num_pose = 3 * (self.cfg.SMPL.NUM_BODY_JOINTS + 1)
+        PSEUDO_GT_EXISTS = self.prohmr_fits_folder is not None and os.path.exists(self.prohmr_fits_folder)
         for i in range(len(self.img_paths)):
             img_path = self.img_paths[i]
             item = self.get_example(img_path)
@@ -105,23 +120,50 @@ class OpenPoseDataset(ImageDataset):
                 body_keypoints.append(keypoints_n)
                 scales.append(scale)
                 centers.append(center)
-                imgnames.append(item['img_path'])
+                assert os.path.join(self.img_dir, item['img_name']) == img_path
+                imgnames.append(item['img_name'])
                 personids.append(n)
+
+                img_fn, img_ext = os.path.splitext(item['img_name'])
+                prohmr_fit_path = f'{self.prohmr_fits_folder}/{img_fn}_p{n}_fitting.npz' # Assuming fixed name format for pseudo-gt fitting npz
+                if PSEUDO_GT_EXISTS and Path(prohmr_fit_path).exists():
+                    prohmr_fit = np.load(prohmr_fit_path, allow_pickle=True)
+                    body_pose_rotmat = np.concatenate([prohmr_fit['global_orient'][None], prohmr_fit['body_pose']], axis=0)
+                    body_pose_rotmat_aa = rotmat_to_aa(body_pose_rotmat)
+                    assert body_pose_rotmat_aa.shape == (self.cfg.SMPL.NUM_BODY_JOINTS + 1, 3)
+                    body_pose.append(body_pose_rotmat_aa.reshape(-1))
+                    has_body_pose.append(1)
+                    betas.append(prohmr_fit['betas'])
+                    has_betas.append(1)
+                    extra_info.append({'fitting_loss': prohmr_fit['losses']})
+                else:
+                    body_pose.append(np.zeros(num_pose, dtype=np.float32))
+                    has_body_pose.append(0)
+                    betas.append(np.zeros(10, dtype=np.float32))
+                    has_betas.append(0)
+                    extra_info.append({})
+
         self.imgname = np.array(imgnames)
         self.personid = np.array(personids, dtype=np.int32)
         self.scale = np.array(scales).astype(np.float32) / 200.0
         self.center = np.array(centers).astype(np.float32)
         body_keypoints_2d = np.array(body_keypoints).astype(np.float32)
-        extra_keypoints_2d = np.zeros((len(self.center), 19, 3))
+        N = len(self.center)
+        extra_keypoints_2d = np.zeros((N, 19, 3))
         self.keypoints_2d = np.concatenate((body_keypoints_2d, extra_keypoints_2d), axis=1).astype(np.float32)
-        body_keypoints_3d = np.zeros((len(self.center), 25, 4), dtype=np.float32)
-        extra_keypoints_3d = np.zeros((len(self.center), 19, 4), dtype=np.float32)
+        body_keypoints_3d = np.zeros((N, 25, 4), dtype=np.float32)
+        extra_keypoints_3d = np.zeros((N, 19, 4), dtype=np.float32)
         self.keypoints_3d = np.concatenate((body_keypoints_3d, extra_keypoints_3d), axis=1).astype(np.float32)
-        num_pose = 3 * (self.cfg.SMPL.NUM_BODY_JOINTS + 1)
-        self.body_pose = np.zeros((len(self.imgname), num_pose), dtype=np.float32)
-        self.has_body_pose = np.zeros(len(self.imgname), dtype=np.float32)
-        self.betas = np.zeros((len(self.imgname), 10), dtype=np.float32)
-        self.has_betas = np.zeros(len(self.imgname), dtype=np.float32)
+
+        self.body_pose = np.stack(body_pose, axis=0).astype(np.float32)
+        self.has_body_pose = np.array(has_body_pose, dtype=np.float32)
+        self.betas = np.stack(betas, axis=0).astype(np.float32)
+        self.has_betas = np.array(has_betas, dtype=np.float32)
+        assert self.body_pose.shape == (N, num_pose), self.body_pose.shape
+        assert self.has_body_pose.shape == (N,)
+        assert self.betas.shape == (N, 10)
+        assert self.has_betas.shape == (N,)
+        self.extra_info = extra_info
 
     def get_example(self, img_path: str) -> Dict:
         """
@@ -131,7 +173,8 @@ class OpenPoseDataset(ImageDataset):
         Returns:
             Dict: Dictionary containing the image path and 2D keypoints if available, else an empty dictionary.
         """
-        img_fn, _ = os.path.splitext(os.path.split(img_path)[1])
+        img_name = os.path.split(img_path)[1]
+        img_fn, _ = os.path.splitext(img_name)
 
         keypoint_fn = os.path.join(self.keypoint_folder,
                                img_fn + '_keypoints.json')
@@ -142,5 +185,37 @@ class OpenPoseDataset(ImageDataset):
         keypoints_2d = np.stack(keypoints_2d)
 
         item = {'img_path': img_path,
+                'img_name': img_name,
                 'keypoints_2d': keypoints_2d}
         return item
+
+if __name__ == '__main__':
+    from prohmr.configs import prohmr_config
+
+    ROOT='/home/shubham/code/stable-humans/logs_/dev/insta/'
+    IMAGES_DIR=f"{ROOT}/images/instavariety/"
+    DETECTIONS_DIR=f"{ROOT}/vitdet/instavariety/"
+    KEYPOINTS_DIR=f"{ROOT}/vitpose/instavariety/"
+    PROHMR_FIT_DIR=f"{ROOT}/prohmr_fit/instavariety/"
+
+    model_cfg = prohmr_config()
+
+    dataset = OpenPoseDataset(
+        cfg=model_cfg,
+        img_folder=IMAGES_DIR,
+        keypoint_folder=KEYPOINTS_DIR,
+        prohmr_fits_folder=PROHMR_FIT_DIR,
+    )
+
+    print(dataset.has_betas.mean())
+    print(dataset.has_body_pose.mean())
+    print(dataset.betas.mean(axis=0))
+    print(dataset.body_pose.mean(axis=0))
+
+    dataset2 = OpenPoseDataset(
+        cfg=model_cfg,
+        img_folder=IMAGES_DIR,
+        keypoint_folder=KEYPOINTS_DIR,
+    )
+    print(dataset2.has_betas.mean())
+    print(dataset2.has_body_pose.mean())
