@@ -91,17 +91,17 @@ class KeypointFitting(OptimizationTask):
             smpl_params['betas'] = betas
             smpl_output = self.smpl(**smpl_params, pose2rot=False)
             model_joints = smpl_output.joints
-            loss = keypoint_fitting_loss(smpl_params, model_joints,
+            loss: torch.Tensor = keypoint_fitting_loss(smpl_params, model_joints,
                                         camera_translation, camera_center, img_size,
                                         joints_2d, joints_conf, pose_prior,
-                                        focal_length, shape_prior_weight=20.)
+                                        focal_length, shape_prior_weight=20.)  # type: ignore
             loss.backward()
             return loss
 
         # Run fitting until convergence
         prev_loss = None
         for i in range(self.max_iters):
-            loss = optimizer.step(closure)
+            loss: torch.Tensor = optimizer.step(closure)  # type: ignore
             if i > 0:
                 loss_rel_change = rel_change(prev_loss, loss.item())
                 if loss_rel_change < self.ftol:
@@ -124,5 +124,10 @@ class KeypointFitting(OptimizationTask):
         opt_output['model_joints'] = model_joints
         opt_output['vertices'] = vertices
         opt_output['camera_translation'] = camera_translation.detach()
+        opt_output['losses'] = keypoint_fitting_loss(smpl_params, model_joints,
+                                                    camera_translation, camera_center, img_size,
+                                                    joints_2d, joints_conf, pose_prior,
+                                                    focal_length, shape_prior_weight=20., 
+                                                    return_components=True)
 
         return opt_output

@@ -91,6 +91,7 @@ for i, batch in enumerate(tqdm(dataloader)):
             'body_pose': opt_out['smpl_params']['body_pose'].detach().cpu().numpy(),
             'betas': opt_out['smpl_params']['betas'].detach().cpu().numpy(),
             'camera_translation': opt_out['camera_translation'].detach().cpu().numpy(),
+            'losses': {k: v.detach().cpu().numpy() for k,v in opt_out['losses'].items()},
         }
 
     batch_size = batch['img'].shape[0]
@@ -104,7 +105,7 @@ for i, batch in enumerate(tqdm(dataloader)):
                             **{k:v[n] for k,v in out_dict.items()})
         if args.run_fitting:
             np.savez(os.path.join(args.out_folder, f'{img_fn}_fitting.npz'),
-                     **{k:v[n] for k,v in opt_out_dict.items()})
+                     **{k:v[n] if not isinstance(v, dict) else {k2:v2[n] for k2,v2 in v.items()} for k,v in opt_out_dict.items()})
 
         if not args.render_viz:
             continue

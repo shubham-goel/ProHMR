@@ -28,7 +28,8 @@ def keypoint_fitting_loss(smpl_params: Dict,
                           focal_length: torch.Tensor,
                           sigma: float = 100.0,
                           pose_prior_weight: float = 4.0,
-                          shape_prior_weight: float = 6.0) -> torch.Tensor:
+                          shape_prior_weight: float = 6.0,
+                          return_components: bool = False) -> torch.Tensor|Dict[str, torch.Tensor]:
     """
     Loss function for fitting the SMPL model on 2D keypoints.
     Args:
@@ -42,6 +43,7 @@ def keypoint_fitting_loss(smpl_params: Dict,
         focal_length (float): Focal length value in pixels.
         pose_prior_weight (float): Pose prior loss weight.
         shape_prior_weight (float): Shape prior loss weight.
+        return_components (bool): Return unreduced component losses.
     Returns:
         torch.Tensor: Total loss value.
     """
@@ -58,18 +60,26 @@ def keypoint_fitting_loss(smpl_params: Dict,
 
     # Compute robust reprojection loss
     reprojection_error = gmof(projected_joints - joints_2d, sigma)
-    reprojection_loss = ((data_weight ** 2) * (joints_conf ** 2) * reprojection_error).sum()
+    reprojection_loss = ((data_weight ** 2) * (joints_conf ** 2) * reprojection_error).sum(dim=(1,2))
 
     # Compute pose prior loss
-    pose_prior_loss = (pose_prior_weight ** 2) * pose_prior().sum()
+    pose_prior_loss = ((pose_prior_weight ** 2) * pose_prior())
 
     # Compute shape prior loss
-    shape_prior_loss = (shape_prior_weight ** 2) * (betas ** 2).sum()
+    shape_prior_loss = ((shape_prior_weight ** 2) * (betas ** 2)).sum(dim=1)
 
     # Add up all losses
     total_loss = reprojection_loss + pose_prior_loss + shape_prior_loss
 
-    return total_loss.sum()
+    if return_components:
+        return {
+            'total_loss': total_loss,
+            'reprojection_loss': reprojection_loss,
+            'pose_prior_loss': pose_prior_loss,
+            'shape_prior_loss': shape_prior_loss
+        }
+    else:
+        return total_loss.sum()
 
 def multiview_loss(smpl_params: Dict,
                    pose_prior: Callable,
