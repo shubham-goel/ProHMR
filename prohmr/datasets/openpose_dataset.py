@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import re
 from typing import Dict, Optional
+from tqdm import tqdm
 
 from yacs.config import CfgNode
 
@@ -54,6 +55,7 @@ class OpenPoseDataset(ImageDataset):
                  max_people_per_image: Optional[int] = None,
                  img_name_filter: str = '.*',
                  prohmr_fits_folder: Optional[str] = None,
+                 walk_subdirectories: bool = False,
                  **kwargs):
         """
         Dataset class used for loading images and corresponding annotations from image/OpenPose pairs.
@@ -66,14 +68,25 @@ class OpenPoseDataset(ImageDataset):
             train (bool): Whether it is for training or not (enables data augmentation)
         """
 
+        super(ImageDataset, self).__init__()
         self.cfg = cfg
         self.img_folder = img_folder
         self.keypoint_folder = keypoint_folder
         self.prohmr_fits_folder = prohmr_fits_folder
 
         matcher = regex_to_matcher(img_name_filter)
-        self.img_paths = [os.path.join(self.img_folder, img_fn)
-                          for img_fn in os.listdir(self.img_folder) if matcher(img_fn)]
+        if not walk_subdirectories:
+            self.img_paths = [os.path.join(self.img_folder, img_fn)
+                            for img_fn in os.listdir(self.img_folder) if matcher(img_fn)]
+        else:
+            self.img_paths = []
+            for root, _, files in os.walk(self.img_folder):
+                for img_fn in files:
+                    img_fpath = os.path.join(root, img_fn)
+                    img_fn_relative = os.path.relpath(img_fpath, self.img_folder)
+                    if matcher(img_fn_relative):
+                        self.img_paths.append(img_fpath)
+        print(f'Found {len(self.img_paths)} images in {self.img_folder}')
         self.img_paths = sorted(self.img_paths)
         self.rescale_factor = rescale_factor
         self.train = train
@@ -104,7 +117,7 @@ class OpenPoseDataset(ImageDataset):
         extra_info = []
         num_pose = 3 * (self.cfg.SMPL.NUM_BODY_JOINTS + 1)
         PSEUDO_GT_EXISTS = self.prohmr_fits_folder is not None and os.path.exists(self.prohmr_fits_folder)
-        for i in range(len(self.img_paths)):
+        for i in tqdm(range(len(self.img_paths))):
             img_path = self.img_paths[i]
             item = self.get_example(img_path)
             if len(item) == 0:
@@ -135,7 +148,10 @@ class OpenPoseDataset(ImageDataset):
                     has_body_pose.append(1)
                     betas.append(prohmr_fit['betas'])
                     has_betas.append(1)
-                    extra_info.append({'fitting_loss': prohmr_fit['losses']})
+                    extra_info.append({
+                        'fitting_loss': prohmr_fit['losses'],
+                        'fitting_cam_t': prohmr_fit['camera_translation']
+                    })
                 else:
                     body_pose.append(np.zeros(num_pose, dtype=np.float32))
                     has_body_pose.append(0)
@@ -173,7 +189,9 @@ class OpenPoseDataset(ImageDataset):
         Returns:
             Dict: Dictionary containing the image path and 2D keypoints if available, else an empty dictionary.
         """
-        img_name = os.path.split(img_path)[1]
+        # img_name = os.path.split(img_path)[1]
+        assert Path(self.img_dir) in Path(img_path).parents
+        img_name = os.path.relpath(img_path, self.img_dir)
         img_fn, _ = os.path.splitext(img_name)
 
         keypoint_fn = os.path.join(self.keypoint_folder,

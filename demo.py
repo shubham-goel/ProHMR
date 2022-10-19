@@ -38,6 +38,7 @@ parser.add_argument('--full_frame', dest='full_frame', action='store_true', defa
 parser.add_argument('--batch_size', type=int, default=1, help='Batch size for inference/fitting')
 parser.add_argument("--img_name_filter", type=str, default='.*', help='Filter for image names. Only images with names matching this filter will be processed.')
 parser.add_argument("--render_viz", action='store_true', help='If set, render the visualization of the fitting')
+parser.add_argument("--save_regression", action='store_true', help='If set, save regression results')
 
 
 args = parser.parse_args()
@@ -57,7 +58,13 @@ if args.run_fitting:
     keypoint_fitting = KeypointFitting(model_cfg)
 
 # Create a dataset on-the-fly
-dataset = OpenPoseDataset(model_cfg, img_folder=args.img_folder, keypoint_folder=args.keypoint_folder, max_people_per_image=None, img_name_filter=args.img_name_filter)
+dataset = OpenPoseDataset(model_cfg,
+                        img_folder=args.img_folder,
+                        keypoint_folder=args.keypoint_folder,
+                        max_people_per_image=None,
+                        img_name_filter=args.img_name_filter,
+                        walk_subdirectories=True
+                    )
 
 # Setup a dataloader with batch_size = 1 (Process images sequentially)
 dataloader = torch.utils.data.DataLoader(dataset, args.batch_size, shuffle=False, drop_last=False)
@@ -101,8 +108,9 @@ for i, batch in enumerate(tqdm(dataloader)):
         img_fn = f'{img_fn}_p{personid}'
 
         # Save result to disk
-        np.savez(os.path.join(args.out_folder, f'{img_fn}_regression.npz'),
-                            **{k:v[n] for k,v in out_dict.items()})
+        if args.save_regression:
+            np.savez(os.path.join(args.out_folder, f'{img_fn}_regression.npz'),
+                                **{k:v[n] for k,v in out_dict.items()})
         if args.run_fitting:
             np.savez(os.path.join(args.out_folder, f'{img_fn}_fitting.npz'),
                      **{k:v[n] if not isinstance(v, dict) else {k2:v2[n] for k2,v2 in v.items()} for k,v in opt_out_dict.items()})
