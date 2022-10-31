@@ -12,12 +12,26 @@ The rendered results will be saved to /path/to/output, with the suffix _regressi
 Please keep in mind that we do not recommend to use `--full_frame` when the image resolution is above 2K because of known issues with the data term of SMPLify.
 In these cases you can resize all images such that the maximum image dimension is at most 2K.
 """
+from pathlib import Path
 import torch
 import argparse
 import os
 import cv2
 import numpy as np
 from tqdm import tqdm
+
+# Signal handling
+import signal
+def print_signal(sig, frame):
+    sig = signal.Signals(sig)
+    print("Script recieved signal:", sig)
+    if sig in [signal.SIGTERM, signal.SIGINT, signal.SIGCONT, signal.SIGUSR1]:
+        print(f"{sig.name} recieved, raising SIGINT")
+        raise InterruptedError(sig.name)
+
+signal.signal(signal.SIGTERM, print_signal)
+signal.signal(signal.SIGCONT, print_signal)
+signal.signal(signal.SIGUSR1, print_signal)
 
 from prohmr.configs import get_config, prohmr_config, dataset_config
 from prohmr.models import ProHMR
@@ -57,13 +71,21 @@ model.eval()
 if args.run_fitting:
     keypoint_fitting = KeypointFitting(model_cfg)
 
+def extra_filter(img_path, personid):
+    # Run on image only if filter returns True
+    img_fn, _ = os.path.splitext(os.path.relpath(img_path, args.img_folder))
+    img_fn = f'{img_fn}_p{personid}'
+    fit_path = os.path.join(args.out_folder, f'{img_fn}_fitting.npz')
+    return not os.path.exists(fit_path)
+
 # Create a dataset on-the-fly
 dataset = OpenPoseDataset(model_cfg,
                         img_folder=args.img_folder,
                         keypoint_folder=args.keypoint_folder,
                         max_people_per_image=None,
                         img_name_filter=args.img_name_filter,
-                        walk_subdirectories=True
+                        walk_subdirectories=True,
+                        extra_filter=extra_filter
                     )
 
 # Setup a dataloader with batch_size = 1 (Process images sequentially)
@@ -103,9 +125,12 @@ for i, batch in enumerate(tqdm(dataloader)):
 
     batch_size = batch['img'].shape[0]
     for n in range(batch_size):
-        img_fn, _ = os.path.splitext(os.path.split(batch['imgname'][n])[1])
+        img_fn, _ = os.path.splitext(os.path.relpath(batch['imgname'][n], args.img_folder))
         personid = batch['personid'][n]
         img_fn = f'{img_fn}_p{personid}'
+
+        # Make output directory since it may not exist
+        Path(os.path.join(args.out_folder, img_fn)).parent.mkdir(parents=True, exist_ok=True)
 
         # Save result to disk
         if args.save_regression:

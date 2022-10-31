@@ -73,6 +73,7 @@ class OpenPoseDataset(ImageDataset):
         self.img_folder = img_folder
         self.keypoint_folder = keypoint_folder
         self.prohmr_fits_folder = prohmr_fits_folder
+        self.extra_filter = kwargs.get('extra_filter', lambda _impath, _pid: True)
 
         matcher = regex_to_matcher(img_name_filter)
         if not walk_subdirectories:
@@ -124,6 +125,8 @@ class OpenPoseDataset(ImageDataset):
                 continue
             num_people = item['keypoints_2d'].shape[0]
             for n in range(num_people):
+                if not self.extra_filter(img_path, n):
+                    continue
                 keypoints_n = item['keypoints_2d'][n]
                 keypoints_valid_n = keypoints_n[keypoints_n[:, 1] > 0, :].copy()
                 bbox = [min(keypoints_valid_n[:,0]), min(keypoints_valid_n[:,1]),
@@ -162,9 +165,13 @@ class OpenPoseDataset(ImageDataset):
         self.imgname = np.array(imgnames)
         self.personid = np.array(personids, dtype=np.int32)
         self.scale = np.array(scales).astype(np.float32) / 200.0
+        if len(self) == 0: # Uses len(self.scale)
+            # No valid data, no need to save it
+            print('No valid data, no need to save it')
+            return
         self.center = np.array(centers).astype(np.float32)
-        body_keypoints_2d = np.array(body_keypoints).astype(np.float32)
         N = len(self.center)
+        body_keypoints_2d = np.array(body_keypoints).astype(np.float32)
         extra_keypoints_2d = np.zeros((N, 19, 3))
         self.keypoints_2d = np.concatenate((body_keypoints_2d, extra_keypoints_2d), axis=1).astype(np.float32)
         body_keypoints_3d = np.zeros((N, 25, 4), dtype=np.float32)
