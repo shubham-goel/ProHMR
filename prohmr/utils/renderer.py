@@ -105,7 +105,7 @@ class Renderer:
         camera_pose[:3, 3] = camera_translation
         camera_center = [image.shape[1] / 2., image.shape[0] / 2.]
         camera = pyrender.IntrinsicsCamera(fx=self.focal_length, fy=self.focal_length,
-                                           cx=camera_center[0], cy=camera_center[1])
+                                           cx=camera_center[0], cy=camera_center[1], zfar=10000.0)
         scene.add(camera, pose=camera_pose)
 
 
