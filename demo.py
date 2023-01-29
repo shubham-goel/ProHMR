@@ -51,7 +51,9 @@ parser.add_argument('--run_fitting', dest='run_fitting', action='store_true', de
 parser.add_argument('--full_frame', dest='full_frame', action='store_true', default=False, help='If set, run fitting in the original image space and not in the crop.')
 parser.add_argument('--batch_size', type=int, default=1, help='Batch size for inference/fitting')
 parser.add_argument("--img_name_filter", type=str, default='.*', help='Filter for image names. Only images with names matching this filter will be processed.')
+parser.add_argument("--extension", type=str, default='jpg', help='Image extension to process.')
 parser.add_argument("--render_viz", action='store_true', help='If set, render the visualization of the fitting')
+parser.add_argument("--use_hips", action='store_true', help='If set, use hips in fitting')
 parser.add_argument("--save_regression", action='store_true', help='If set, save regression results')
 
 
@@ -85,8 +87,8 @@ dataset = OpenPoseDataset(model_cfg,
                         max_people_per_image=None,
                         img_name_filter=args.img_name_filter,
                         walk_subdirectories=True,
-                        extra_filter=extra_filter
-                    )
+                        extra_filter=extra_filter,
+                        extension=args.extension)
 
 # Setup a dataloader with batch_size = 1 (Process images sequentially)
 dataloader = torch.utils.data.DataLoader(dataset, args.batch_size, shuffle=False, drop_last=False)
@@ -113,7 +115,7 @@ for i, batch in enumerate(tqdm(dataloader)):
         opt_out = model.downstream_optimization(regression_output=out,
                                                 batch=batch,
                                                 opt_task=keypoint_fitting,
-                                                use_hips=False,
+                                                use_hips=args.use_hips,
                                                 full_frame=args.full_frame)
         opt_out_dict = {
             'global_orient': opt_out['smpl_params']['global_orient'].squeeze(1).detach().cpu().numpy(),

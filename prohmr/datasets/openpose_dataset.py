@@ -56,6 +56,7 @@ class OpenPoseDataset(ImageDataset):
                  img_name_filter: str = '.*',
                  prohmr_fits_folder: Optional[str] = None,
                  walk_subdirectories: bool = False,
+                 extension: str = 'jpg',
                  **kwargs):
         """
         Dataset class used for loading images and corresponding annotations from image/OpenPose pairs.
@@ -80,13 +81,11 @@ class OpenPoseDataset(ImageDataset):
             self.img_paths = [os.path.join(self.img_folder, img_fn)
                             for img_fn in os.listdir(self.img_folder) if matcher(img_fn)]
         else:
-            self.img_paths = []
-            for root, _, files in os.walk(self.img_folder):
-                for img_fn in files:
-                    img_fpath = os.path.join(root, img_fn)
-                    img_fn_relative = os.path.relpath(img_fpath, self.img_folder)
-                    if matcher(img_fn_relative):
-                        self.img_paths.append(img_fpath)
+            import glob
+            self.img_paths = glob.glob(os.path.join(self.img_folder, f"**/*.{extension}"), recursive=True)
+            self.img_paths = list(
+                filter(lambda x: matcher(os.path.relpath(x, self.img_folder)), self.img_paths)
+            )
         print(f'Found {len(self.img_paths)} images in {self.img_folder}')
         self.img_paths = sorted(self.img_paths)
         self.rescale_factor = rescale_factor

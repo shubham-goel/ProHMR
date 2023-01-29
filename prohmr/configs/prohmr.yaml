@@ -20,6 +20,7 @@ SMPL:
   NUM_BODY_JOINTS: 23
   JOINT_REGRESSOR_EXTRA: data/SMPL_to_J19.pkl
   MEAN_PARAMS: data/smpl_mean_params.npz
+  update_hips: True
 GENERAL:
   TOTAL_STEPS: 500000
   LOG_STEPS: 100
